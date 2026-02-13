@@ -1,0 +1,198 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  CASHIER
+  KITCHEN
+}
+
+enum OrderStatus {
+  PENDING
+  PREPARING
+  READY
+  PICKED_UP
+  NO_SHOW
+  CANCELLED
+}
+
+enum OrderSource {
+  POS
+  KIOSK
+  ONLINE
+}
+
+enum SelectionType {
+  SINGLE
+  MULTIPLE
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         UserRole @default(CASHIER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  orders       Order[]
+}
+
+model Customer {
+  id          String    @id @default(cuid())
+  name        String
+  phone       String    @unique
+  email       String?
+  noShowCount Int       @default(0)
+  isFlagged   Boolean   @default(false)
+  totalOrders Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  orders      Order[]
+  noShows     NoShow[]
+}
+
+model Category {
+  id          String     @id @default(cuid())
+  name        String
+  description String?
+  sortOrder   Int        @default(0)
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  menuItems   MenuItem[]
+}
+
+model MenuItem {
+  id             String          @id @default(cuid())
+  name           String
+  description    String?
+  price          Decimal         @db.Decimal(10, 2)
+  imageUrl       String?
+  categoryId     String
+  category       Category        @relation(fields: [categoryId], references: [id])
+  isAvailable    Boolean         @default(true)
+  preparationTime Int            @default(10)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  modifierGroups ModifierGroup[]
+  orderItems     OrderItem[]
+  inventory      Inventory[]
+}
+
+model ModifierGroup {
+  id            String        @id @default(cuid())
+  name          String
+  menuItemId    String
+  menuItem      MenuItem      @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  selectionType SelectionType @default(SINGLE)
+  minSelections Int           @default(0)
+  maxSelections Int           @default(1)
+  isRequired    Boolean       @default(false)
+  sortOrder     Int           @default(0)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  modifiers     Modifier[]
+}
+
+model Modifier {
+  id              String              @id @default(cuid())
+  name            String
+  priceAdjustment Decimal             @default(0) @db.Decimal(10, 2)
+  modifierGroupId String
+  modifierGroup   ModifierGroup       @relation(fields: [modifierGroupId], references: [id], onDelete: Cascade)
+  isAvailable     Boolean             @default(true)
+  isDefault       Boolean             @default(false)
+  sortOrder       Int                 @default(0)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  customizations  ItemCustomization[]
+}
+
+model Order {
+  id                  String      @id @default(cuid())
+  orderNumber         Int
+  customerId          String?
+  customer            Customer?   @relation(fields: [customerId], references: [id])
+  staffId             String?
+  staff               User?       @relation(fields: [staffId], references: [id])
+  status              OrderStatus @default(PENDING)
+  source              OrderSource
+  subtotal            Decimal     @db.Decimal(10, 2)
+  tax                 Decimal     @default(0) @db.Decimal(10, 2)
+  total               Decimal     @db.Decimal(10, 2)
+  specialInstructions String?
+  pickupTime          DateTime?
+  readyAt             DateTime?
+  pickedUpAt          DateTime?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  orderItems          OrderItem[]
+  noShow              NoShow?
+}
+
+model OrderItem {
+  id             String              @id @default(cuid())
+  orderId        String
+  order          Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId     String
+  menuItem       MenuItem            @relation(fields: [menuItemId], references: [id])
+  quantity       Int                 @default(1)
+  unitPrice      Decimal             @db.Decimal(10, 2)
+  notes          String?
+  createdAt      DateTime            @default(now())
+  customizations ItemCustomization[]
+}
+
+model ItemCustomization {
+  id              String    @id @default(cuid())
+  orderItemId     String
+  orderItem       OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  modifierId      String
+  modifier        Modifier  @relation(fields: [modifierId], references: [id])
+  priceAdjustment Decimal   @db.Decimal(10, 2)
+}
+
+model Inventory {
+  id           String   @id @default(cuid())
+  name         String
+  menuItemId   String?
+  menuItem     MenuItem? @relation(fields: [menuItemId], references: [id])
+  quantity     Int      @default(0)
+  unit         String   @default("unit")
+  minThreshold Int      @default(10)
+  costPerUnit  Decimal  @default(0) @db.Decimal(10, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model NoShow {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  orderId    String   @unique
+  order      Order    @relation(fields: [orderId], references: [id])
+  orderValue Decimal  @db.Decimal(10, 2)
+  reason     String?
+  occurredAt DateTime @default(now())
+}
+
+model DailyOrderSequence {
+  id        String   @id @default(cuid())
+  date      DateTime @unique @db.Date
+  lastNumber Int     @default(0)
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  eventType String
+  data      Json
+  createdAt DateTime @default(now())
+}
