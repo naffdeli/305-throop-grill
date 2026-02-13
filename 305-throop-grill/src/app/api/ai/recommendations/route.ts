@@ -1,21 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRecommendations, getPopularPairings } from "@/lib/ai";
+import { getPopularPairings } from "@/lib/ai";
 import prisma from "@/lib/db";
+import { z } from "zod";
+
+const RecommendationsSchema = z.object({
+  currentItemName: z.string().max(100).optional(),
+});
 
 export async function POST(request: NextRequest) {
   try {
-    const { customerId, currentItemName } = await request.json();
+    const body = await request.json();
+
+    const validation = RecommendationsSchema.safeParse(body);
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: "Validation failed", details: validation.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const { currentItemName } = validation.data;
 
     const menuItems = await prisma.menuItem.findMany({
       where: { isAvailable: true },
-      select: { name: true, description: true, category: { select: { name: true } } },
+      select: { name: true },
     });
-
-    const formattedMenu = menuItems.map((item) => ({
-      name: item.name,
-      description: item.description || "",
-      category: item.category.name,
-    }));
 
     if (currentItemName) {
       const pairings = await getPopularPairings(
@@ -25,51 +34,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ recommendations: pairings, type: "pairing" });
     }
 
-    if (customerId) {
-      const customer = await prisma.customer.findUnique({
-        where: { id: customerId },
-        include: {
-          orders: {
-            take: 5,
-            orderBy: { createdAt: "desc" },
-            include: {
-              orderItems: {
-                include: { menuItem: { select: { name: true } } },
-              },
-            },
-          },
-        },
-      });
-
-      if (customer && customer.orders.length > 0) {
-        const history = customer.orders.flatMap((order) =>
-          order.orderItems.map((item) => item.menuItem?.name || "")
-        );
-
-        const recommendations = await getRecommendations(history, formattedMenu);
-        return NextResponse.json({ recommendations, type: "personalized" });
-      }
-    }
-
-    const popularItems = await prisma.orderItem.groupBy({
-      by: ["menuItemId"],
-      _count: { menuItemId: true },
-      orderBy: { _count: { menuItemId: "desc" } },
-      take: 5,
-    });
-
-    const popularNames = await Promise.all(
-      popularItems.map(async (item) => {
-        const menuItem = await prisma.menuItem.findUnique({
-          where: { id: item.menuItemId },
-          select: { name: true },
-        });
-        return menuItem?.name || "";
-      })
-    );
+    const popularItems = await prisma.$queryRaw<{ name: string; count: bigint }[]>`
+      SELECT mi.name, COUNT(*) as count
+      FROM "OrderItem" oi
+      JOIN "MenuItem" mi ON oi."menuItemId" = mi.id
+      WHERE mi."isAvailable" = true
+      GROUP BY mi.id, mi.name
+      ORDER BY count DESC
+      LIMIT 5
+    `;
 
     return NextResponse.json({
-      recommendations: popularNames.filter(Boolean),
+      recommendations: popularItems.map(item => item.name),
       type: "popular",
     });
   } catch (error) {

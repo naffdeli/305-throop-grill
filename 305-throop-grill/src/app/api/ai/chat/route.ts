@@ -1,10 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getChatResponse } from "@/lib/ai";
 import prisma from "@/lib/db";
+import { z } from "zod";
+
+const ChatRequestSchema = z.object({
+  messages: z.array(z.object({
+    role: z.enum(["user", "assistant"]),
+    content: z.string().max(1000, "Message too long"),
+  })).min(1).max(10, "Too many messages"),
+});
 
 export async function POST(request: NextRequest) {
   try {
-    const { messages } = await request.json();
+    const body = await request.json();
+
+    const validation = ChatRequestSchema.safeParse(body);
+    if (!validation.success) {
+      return NextResponse.json(
+        { error: "Validation failed", details: validation.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const { messages } = validation.data;
 
     const categories = await prisma.category.findMany({
       where: { isActive: true },

@@ -61,6 +61,69 @@ export async function PUT(
     }
 
     const data = validation.data;
+
+    if (data.status === "NO_SHOW") {
+      const order = await prisma.$transaction(async (tx) => {
+        const existingNoShow = await tx.noShow.findUnique({
+          where: { orderId: params.id },
+        });
+
+        if (existingNoShow) {
+          throw new Error("Order already marked as no-show");
+        }
+
+        const currentOrder = await tx.order.findUnique({
+          where: { id: params.id },
+          select: { customerId: true, total: true, status: true },
+        });
+
+        if (!currentOrder) {
+          throw new Error("Order not found");
+        }
+
+        if (currentOrder.status === "NO_SHOW") {
+          throw new Error("Order already marked as no-show");
+        }
+
+        if (currentOrder.customerId) {
+          await tx.customer.update({
+            where: { id: currentOrder.customerId },
+            data: {
+              noShowCount: { increment: 1 },
+              isFlagged: true,
+            },
+          });
+
+          await tx.noShow.create({
+            data: {
+              customerId: currentOrder.customerId,
+              orderId: params.id,
+              orderValue: currentOrder.total,
+            },
+          });
+        }
+
+        return tx.order.update({
+          where: { id: params.id },
+          data: { status: "NO_SHOW" },
+          include: {
+            customer: true,
+            staff: true,
+            orderItems: {
+              include: {
+                menuItem: true,
+                customizations: {
+                  include: { modifier: true },
+                },
+              },
+            },
+          },
+        });
+      });
+
+      return NextResponse.json(order);
+    }
+
     const updateData: any = {};
 
     if (data.status) {
@@ -70,29 +133,6 @@ export async function PUT(
         updateData.readyAt = new Date();
       } else if (data.status === "PICKED_UP") {
         updateData.pickedUpAt = new Date();
-      } else if (data.status === "NO_SHOW") {
-        const order = await prisma.order.findUnique({
-          where: { id: params.id },
-          select: { customerId: true, total: true },
-        });
-
-        if (order?.customerId) {
-          await prisma.customer.update({
-            where: { id: order.customerId },
-            data: {
-              noShowCount: { increment: 1 },
-              isFlagged: true,
-            },
-          });
-
-          await prisma.noShow.create({
-            data: {
-              customerId: order.customerId,
-              orderId: params.id,
-              orderValue: order.total,
-            },
-          });
-        }
       }
     }
 
@@ -116,6 +156,7 @@ export async function PUT(
     return NextResponse.json(order);
   } catch (error) {
     console.error("Failed to update order:", error);
-    return NextResponse.json({ error: "Failed to update order" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Failed to update order";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

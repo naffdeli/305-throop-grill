@@ -75,6 +75,13 @@ export async function POST(request: NextRequest) {
 
     const data = validation.data;
 
+    if (data.source === "POS") {
+      const authResult = await requireStaff(request);
+      if (!authResult.authorized) {
+        return authResult.response;
+      }
+    }
+
     const order = await prisma.$transaction(async (tx) => {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -93,8 +100,9 @@ export async function POST(request: NextRequest) {
       let customerId = data.customerId;
 
       if (!customerId && data.customerName && data.customerPhone) {
+        const normalizedPhone = data.customerPhone.replace(/\D/g, "");
         const customer = await tx.customer.upsert({
-          where: { phone: data.customerPhone },
+          where: { phone: normalizedPhone },
           update: {
             name: data.customerName,
             email: data.customerEmail,
@@ -102,7 +110,7 @@ export async function POST(request: NextRequest) {
           },
           create: {
             name: data.customerName,
-            phone: data.customerPhone,
+            phone: normalizedPhone,
             email: data.customerEmail,
             totalOrders: 1,
           },

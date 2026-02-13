@@ -5,7 +5,7 @@ import { Button, Modal, Input } from "@/components/ui";
 import { ItemCustomizer, OrderCart } from "@/components/order";
 import { formatCurrency } from "@/lib/utils";
 import { Category, MenuItem, CartItem, SelectedModifier } from "@/types";
-import { ChefHat, RotateCcw } from "lucide-react";
+import { ChefHat, RotateCcw, AlertCircle } from "lucide-react";
 
 export default function KioskPage() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -17,6 +17,7 @@ export default function KioskPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [orderComplete, setOrderComplete] = useState<{ orderNumber: number } | null>(null);
   const [idleTime, setIdleTime] = useState(0);
+  const [menuError, setMenuError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchMenu();
@@ -45,11 +46,20 @@ export default function KioskPage() {
   }, [idleTime, showCheckout, cart.length]);
 
   const fetchMenu = async () => {
-    const res = await fetch("/api/menu");
-    const data = await res.json();
-    setCategories(data);
-    if (data.length > 0) {
-      setActiveCategory(data[0].id);
+    try {
+      setMenuError(null);
+      const res = await fetch("/api/menu");
+      if (!res.ok) {
+        throw new Error("Failed to load menu");
+      }
+      const data = await res.json();
+      setCategories(data);
+      if (data.length > 0) {
+        setActiveCategory(data[0].id);
+      }
+    } catch (error) {
+      console.error("Failed to fetch menu:", error);
+      setMenuError("Unable to load menu. Please try again or ask staff for help.");
     }
   };
 
@@ -153,6 +163,24 @@ export default function KioskPage() {
   }
 
   const activeMenuItems = categories.find((c) => c.id === activeCategory)?.menuItems || [];
+
+  if (menuError) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-8">
+        <div className="bg-white rounded-3xl shadow-2xl p-12 max-w-lg text-center">
+          <div className="w-24 h-24 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <AlertCircle className="w-12 h-12 text-red-600" />
+          </div>
+          <h1 className="text-2xl font-bold mb-4 text-gray-800">Menu Unavailable</h1>
+          <p className="text-gray-600 mb-6">{menuError}</p>
+          <Button onClick={fetchMenu} size="lg" className="text-xl px-8">
+            <RotateCcw className="w-5 h-5 mr-2" />
+            Try Again
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
